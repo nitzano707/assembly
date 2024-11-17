@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>זיהוי דוברים</title>
     <style>
-        /* ... אותו CSS ... */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
@@ -24,21 +23,6 @@
             text-align: center;
             margin: 20px 0;
             border-radius: 8px;
-        }
-        .segment {
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .speaker-0 { background-color: #e8f4f8; }
-        .speaker-1 { background-color: #fdf2e9; }
-        .time { 
-            min-width: 180px;
-            color: #666;
-            font-family: monospace;
         }
         button {
             background: #3498db;
@@ -108,8 +92,8 @@
                 const uploadResult = await uploadResponse.json();
                 console.log('Upload result:', uploadResult);
 
-                // בקשת זיהוי דוברים
-                status.textContent = 'מזהה דוברים...';
+                // בקשת תמלול עם מינימום פרמטרים
+                status.textContent = 'שולח בקשה...';
                 const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -117,16 +101,14 @@
                         'content-type': 'application/json',
                     },
                     body: JSON.stringify({
-                        audio_url: uploadResult.upload_url,
-                        diarize: true,
-                        speech_model: 'best'
+                        audio_url: uploadResult.upload_url
                     })
                 });
 
                 if (!transcriptResponse.ok) {
                     const errorText = await transcriptResponse.text();
                     console.error('Transcription error response:', errorText);
-                    throw new Error(`שגיאה בבקשת הזיהוי: ${transcriptResponse.status}`);
+                    throw new Error(`שגיאה בבקשת התמלול: ${transcriptResponse.status}`);
                 }
 
                 const transcriptResult = await transcriptResponse.json();
@@ -143,10 +125,11 @@
                     console.log('Polling result:', result);
                     
                     if (result.status === 'completed') {
-                        // מדפיס את כל התוצאה לדיבאג
-                        console.log('Full completed result:', JSON.stringify(result, null, 2));
-                        displayResults(result);
-                        status.textContent = 'הזיהוי הושלם!';
+                        document.getElementById('result').innerHTML = `
+                            <h3>תוצאות:</h3>
+                            <pre dir="ltr">${JSON.stringify(result, null, 2)}</pre>
+                        `;
+                        status.textContent = 'הושלם!';
                         break;
                     } else if (result.status === 'error') {
                         throw new Error(result.error);
@@ -160,67 +143,6 @@
                 console.error('Error:', error);
                 status.textContent = `שגיאה: ${error.message}`;
             }
-        }
-
-        function displayResults(result) {
-            const resultDiv = document.getElementById('result');
-            let html = '<h2>תוצאות הזיהוי:</h2>';
-
-            // בדיקה האם יש words עם מידע על דוברים
-            if (result.words && result.words.length > 0 && result.words[0].speaker !== undefined) {
-                let currentSpeaker = null;
-                let currentStart = null;
-                let currentSegment = [];
-
-                // מעבר על כל המילים וקיבוץ לפי דובר
-                result.words.forEach((word, index) => {
-                    if (currentSpeaker !== word.speaker || index === result.words.length - 1) {
-                        if (currentSegment.length > 0) {
-                            const endTime = index === result.words.length - 1 ? word.end : currentSegment[currentSegment.length - 1].end;
-                            const duration = (endTime - currentStart) / 1000;
-                            
-                            html += `
-                                <div class="segment speaker-${currentSpeaker}">
-                                    <span class="time">${formatTime(currentStart)} - ${formatTime(endTime)}</span>
-                                    <strong>דובר ${currentSpeaker + 1}</strong>
-                                    <span>(${duration.toFixed(1)} שניות)</span>
-                                </div>
-                            `;
-                        }
-                        currentSpeaker = word.speaker;
-                        currentStart = word.start;
-                        currentSegment = [word];
-                    } else {
-                        currentSegment.push(word);
-                    }
-                });
-
-            } else if (result.utterances && result.utterances.length > 0) {
-                result.utterances.forEach(utterance => {
-                    const duration = (utterance.end - utterance.start) / 1000;
-                    html += `
-                        <div class="segment speaker-${utterance.speaker}">
-                            <span class="time">${formatTime(utterance.start)} - ${formatTime(utterance.end)}</span>
-                            <strong>דובר ${parseInt(utterance.speaker) + 1}</strong>
-                            <span>(${duration.toFixed(1)} שניות)</span>
-                        </div>
-                    `;
-                });
-            } else {
-                html += '<p>לא זוהו דוברים</p>';
-                // הצגת מידע נוסף לדיבאג
-                html += `<pre>${JSON.stringify(result, null, 2)}</pre>`;
-            }
-
-            resultDiv.innerHTML = html;
-        }
-
-        function formatTime(ms) {
-            const totalSeconds = Math.floor(ms / 1000);
-            const minutes = Math.floor(totalSeconds / 60);
-            const seconds = totalSeconds % 60;
-            const milliseconds = Math.floor((ms % 1000) / 10);
-            return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
         }
     </script>
 </body>
