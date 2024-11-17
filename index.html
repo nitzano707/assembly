@@ -34,7 +34,6 @@
         }
         .speaker-0 { background-color: #e8f4f8; }
         .speaker-1 { background-color: #fdf2e9; }
-        .speaker-2 { background-color: #e8f8e8; }
         .time {
             min-width: 180px;
             color: #666;
@@ -118,7 +117,11 @@
                     },
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
-                        speaker_labels: true
+                        language_code: 'en',          // שפה באנגלית לזיהוי דוברים
+                        speaker_labels: true,         // הפעלת זיהוי דוברים
+                        speakers_expected: 2,         // מספר דוברים צפוי
+                        acoustic_model: 'assemblyai_default',  // מודל אקוסטי
+                        speech_model: 'default'       // מודל דיבור
                     })
                 });
 
@@ -130,15 +133,16 @@
 
                 const transcriptResult = await transcriptResponse.json();
                 console.log('Transcript request result:', transcriptResult);
-                const id = transcriptResult.id;
 
                 // בדיקת סטטוס
+                status.textContent = 'מעבד...';
                 while (true) {
-                    const pollingResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${id}`, {
+                    const pollingResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptResult.id}`, {
                         headers: { 'authorization': API_KEY }
                     });
                     
                     const result = await pollingResponse.json();
+                    console.log('Polling result:', result);
                     
                     if (result.status === 'completed') {
                         displayResults(result);
@@ -146,10 +150,9 @@
                         break;
                     } else if (result.status === 'error') {
                         throw new Error(result.error);
-                    } else {
-                        status.textContent = `מזהה דוברים... (${result.status})`;
                     }
                     
+                    status.textContent = `מעבד... (${result.status})`;
                     await new Promise(resolve => setTimeout(resolve, 3000));
                 }
 
@@ -161,11 +164,12 @@
 
         function displayResults(result) {
             const resultDiv = document.getElementById('result');
-            let html = '<h2>זיהוי דוברים:</h2>';
+            let html = '<h2>תוצאות הזיהוי:</h2>';
+
+            console.log('Final result:', JSON.stringify(result, null, 2));
 
             if (result.utterances && result.utterances.length > 0) {
                 result.utterances.forEach(utterance => {
-                    // חישוב משך זמן בשניות
                     const duration = (utterance.end - utterance.start) / 1000;
                     
                     html += `
@@ -177,17 +181,16 @@
                     `;
                 });
 
-                // סטטיסטיקות
+                // סיכום
                 const stats = result.utterances.reduce((acc, utterance) => {
-                    const speaker = utterance.speaker;
-                    if (!acc[speaker]) {
-                        acc[speaker] = {
+                    if (!acc[utterance.speaker]) {
+                        acc[utterance.speaker] = {
                             count: 0,
                             totalTime: 0
                         };
                     }
-                    acc[speaker].count++;
-                    acc[speaker].totalTime += (utterance.end - utterance.start) / 1000;
+                    acc[utterance.speaker].count++;
+                    acc[utterance.speaker].totalTime += (utterance.end - utterance.start) / 1000;
                     return acc;
                 }, {});
 
