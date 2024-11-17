@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>זיהוי דוברים</title>
     <style>
+        /* ... אותו CSS ... */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
@@ -34,7 +35,7 @@
         }
         .speaker-0 { background-color: #e8f4f8; }
         .speaker-1 { background-color: #fdf2e9; }
-        .time {
+        .time { 
             min-width: 180px;
             color: #666;
             font-family: monospace;
@@ -117,9 +118,8 @@
                     },
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
-                        speaker_labels: true,
-                        speakers_expected: 2,
-                        speech_model: 'best'  // שימוש במודל הטוב ביותר
+                        diarize: true,
+                        speech_model: 'best'
                     })
                 });
 
@@ -143,6 +143,8 @@
                     console.log('Polling result:', result);
                     
                     if (result.status === 'completed') {
+                        // מדפיס את כל התוצאה לדיבאג
+                        console.log('Full completed result:', JSON.stringify(result, null, 2));
                         displayResults(result);
                         status.textContent = 'הזיהוי הושלם!';
                         break;
@@ -164,10 +166,38 @@
             const resultDiv = document.getElementById('result');
             let html = '<h2>תוצאות הזיהוי:</h2>';
 
-            if (result.utterances && result.utterances.length > 0) {
+            // בדיקה האם יש words עם מידע על דוברים
+            if (result.words && result.words.length > 0 && result.words[0].speaker !== undefined) {
+                let currentSpeaker = null;
+                let currentStart = null;
+                let currentSegment = [];
+
+                // מעבר על כל המילים וקיבוץ לפי דובר
+                result.words.forEach((word, index) => {
+                    if (currentSpeaker !== word.speaker || index === result.words.length - 1) {
+                        if (currentSegment.length > 0) {
+                            const endTime = index === result.words.length - 1 ? word.end : currentSegment[currentSegment.length - 1].end;
+                            const duration = (endTime - currentStart) / 1000;
+                            
+                            html += `
+                                <div class="segment speaker-${currentSpeaker}">
+                                    <span class="time">${formatTime(currentStart)} - ${formatTime(endTime)}</span>
+                                    <strong>דובר ${currentSpeaker + 1}</strong>
+                                    <span>(${duration.toFixed(1)} שניות)</span>
+                                </div>
+                            `;
+                        }
+                        currentSpeaker = word.speaker;
+                        currentStart = word.start;
+                        currentSegment = [word];
+                    } else {
+                        currentSegment.push(word);
+                    }
+                });
+
+            } else if (result.utterances && result.utterances.length > 0) {
                 result.utterances.forEach(utterance => {
                     const duration = (utterance.end - utterance.start) / 1000;
-                    
                     html += `
                         <div class="segment speaker-${utterance.speaker}">
                             <span class="time">${formatTime(utterance.start)} - ${formatTime(utterance.end)}</span>
@@ -176,33 +206,10 @@
                         </div>
                     `;
                 });
-
-                // סיכום
-                const stats = result.utterances.reduce((acc, utterance) => {
-                    if (!acc[utterance.speaker]) {
-                        acc[utterance.speaker] = {
-                            count: 0,
-                            totalTime: 0
-                        };
-                    }
-                    acc[utterance.speaker].count++;
-                    acc[utterance.speaker].totalTime += (utterance.end - utterance.start) / 1000;
-                    return acc;
-                }, {});
-
-                html += '<h3>סיכום:</h3>';
-                Object.entries(stats).forEach(([speaker, data]) => {
-                    html += `
-                        <div>
-                            <strong>דובר ${parseInt(speaker) + 1}:</strong>
-                            ${data.count} מקטעים,
-                            סה"כ ${data.totalTime.toFixed(1)} שניות
-                        </div>
-                    `;
-                });
-
             } else {
                 html += '<p>לא זוהו דוברים</p>';
+                // הצגת מידע נוסף לדיבאג
+                html += `<pre>${JSON.stringify(result, null, 2)}</pre>`;
             }
 
             resultDiv.innerHTML = html;
