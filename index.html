@@ -77,7 +77,7 @@
 
                 statusDiv.innerHTML = 'מתחיל תמלול...';
 
-                // יצירת בקשת תמלול
+                // בקשת תמלול עם המודל הנכון
                 const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -87,6 +87,7 @@
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
                         language_code: 'he',
+                        speech_model: 'nano',  // מודל שתומך בעברית
                         speaker_labels: true
                     })
                 });
@@ -98,8 +99,8 @@
                 }
 
                 const transcriptResult = await transcriptResponse.json();
+                console.log('Transcript request result:', transcriptResult);
                 const transcriptId = transcriptResult.id;
-                console.log('Transcript ID:', transcriptId);
 
                 // בדיקת סטטוס התמלול
                 let transcript;
@@ -111,6 +112,7 @@
                     });
                     
                     transcript = await pollingResponse.json();
+                    console.log('Polling status:', transcript.status);
                     
                     if (transcript.status === 'completed') {
                         break;
