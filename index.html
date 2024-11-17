@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>זיהוי דוברים - AssemblyAI</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 0 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        .upload-section.dragging {
+            background-color: #e8f4f8;
+            border-color: #3498db;
+        }
+        .transcript-segment {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        .speaker-0 { background-color: #e8f4f8; }
+        .speaker-1 { background-color: #fdf2e9; }
+        .timestamp {
+            font-size: 0.8em;
+            color: #666;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        #status {
+            padding: 10px;
+            margin: 10px 0;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            text-align: center;
+            display: none;
+        }
+        #result {
+            margin-top: 20px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background-color: #f0f0f0;
+            border-radius: 2px;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background-color: #3498db;
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>זיהוי דוברים עם AssemblyAI</h1>
+        
+        <div class="upload-section" id="dropZone">
+            <form id="uploadForm">
+                <p>גרור קובץ אודיו לכאן או לחץ לבחירת קובץ</p>
+                <input type="file" id="audioFile" accept="audio/*" required style="display: none;">
+                <button type="button" onclick="document.getElementById('audioFile').click()">בחר קובץ</button>
+                <div id="fileInfo"></div>
+                <button type="submit" id="submitBtn" style="display: none;">התחל תמלול</button>
+            </form>
+        </div>
+
+        <div id="status">
+            <span id="statusText"></span>
+            <div class="progress-bar">
+                <div class="progress-bar-fill" id="progressBar"></div>
+            </div>
+        </div>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const apiKey = "be1668db81284f6ab3e30ae1a7ffac43";
+        const uploadUrl = "https://api.assemblyai.com/v2/upload";
+        const transcriptUrl = "https://api.assemblyai.com/v2/transcript";
+        let selectedFile = null;
+
+        // Event Listeners
+        document.getElementById("uploadForm").addEventListener("submit", handleSubmit);
+        document.getElementById("audioFile").addEventListener("change", handleFileSelect);
+
+        // Drag and Drop handlers
+        const dropZone = document.getElementById("dropZone");
+        dropZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            dropZone.classList.add("dragging");
+        });
+
+        dropZone.addEventListener("dragleave", () => {
+            dropZone.classList.remove("dragging");
+        });
+
+        dropZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            dropZone.classList.remove("dragging");
+            const file = e.dataTransfer.files[0];
+            handleFileSelect({ target: { files: [file] } });
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if (!file.type.startsWith("audio/")) {
+                updateStatus("אנא בחר קובץ אודיו");
+                return;
+            }
+
+            selectedFile = file;
+            document.getElementById("fileInfo").textContent = 
+                `נבחר: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+            document.getElementById("submitBtn").style.display = "inline-block";
+        }
+
+        async function handleSubmit(event) {
+            event.preventDefault();
+            if (!selectedFile) {
+                updateStatus("אנא בחר קובץ אודיו");
+                return;
+            }
+
+            const submitBtn = document.getElementById("submitBtn");
+            submitBtn.disabled = true;
+
+            try {
+                updateStatus("מעלה את הקובץ...", 10);
+                const uploadResponse = await uploadFile(selectedFile);
+                
+                updateStatus("מתחיל תמלול...", 30);
+                const transcriptId = await requestTranscription(uploadResponse.upload_url);
+                
+                updateStatus("מתמלל... אנא המתן", 50);
+                const transcript = await pollForTranscript(transcriptId);
+                
+                updateStatus("התמלול הושלם!", 100);
+                displayTranscript(transcript);
+            } catch (error) {
+                console.error(error);
+                updateStatus("אירעה שגיאה: " + error.message);
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        async function uploadFile(file) {
+            const response = await fetch(uploadUrl, {
+                method: "POST",
+                headers: {
+                    "authorization": apiKey
+                },
+                body: file
+            });
+
+            if (!response.ok) {
+                throw new Error("שגיאה בהעלאת הקובץ");
+            }
+
+            return await response.json();
+        }
+
+        async function requestTranscription(audioUrl) {
+            const response = await fetch(transcriptUrl, {
+                method: "POST",
+                headers: {
+                    "authorization": apiKey,
+                    "content-type": "application/json"
+                },
+                body: JSON.stringify({
+                    audio_url: audioUrl,
+                    speaker_labels: true,
+                    language_code: "he"
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error("שגיאה בבקשת התמלול");
+            }
+
+            return (await response.json()).id;
+        }
+
+        async function pollForTranscript(transcriptId) {
+            const url = `${transcriptUrl}/${transcriptId}`;
+            let progress = 50;
+
+            while (true) {
+                const response = await fetch(url, {
+                    headers: {
+                        "authorization": apiKey
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error("שגיאה בקבלת תוצאות התמלול");
+                }
+
+                const transcript = await response.json();
+                
+                if (transcript.status === "completed") {
+                    return transcript;
+                } else if (transcript.status === "error") {
+                    throw new Error(transcript.error);
+                }
+
+                progress = Math.min(progress + 5, 90);
+                updateStatus("מתמלל... אנא המתן", progress);
+                
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function displayTranscript(transcript) {
+            const resultDiv = document.getElementById("result");
+            
+            if (!transcript.utterances || transcript.utterances.length === 0) {
+                resultDiv.innerHTML = "<p>לא נמצאו תוצאות</p>";
+                return;
+            }
+
+            let html = "";
+            transcript.utterances.forEach(utterance => {
+                const time = formatTime(utterance.start / 1000);
+                html += `
+                    <div class="transcript-segment speaker-${utterance.speaker}">
+                        <span class="timestamp">${time}</span>
+                        <strong>דובר ${utterance.speaker}:</strong>
+                        <span>${utterance.text}</span>
+                    </div>
+                `;
+            });
+
+            resultDiv.innerHTML = html;
+        }
+
+        function updateStatus(message, progress = 0) {
+            const statusDiv = document.getElementById("status");
+            const statusText = document.getElementById("statusText");
+            const progressBar = document.getElementById("progressBar");
+            
+            statusDiv.style.display = "block";
+            statusText.textContent = message;
+            
+            if (progress > 0) {
+                progressBar.style.width = `${progress}%`;
+            }
+        }
+    </script>
+</body>
+</html>
