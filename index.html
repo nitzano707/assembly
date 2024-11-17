@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>זיהוי דוברים - AssemblyAI</title>
+    <title>תמלול אודיו - AssemblyAI</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -25,16 +25,41 @@
             margin: 20px 0;
             border-radius: 8px;
         }
+        .options-section {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
         #status, #result { margin-top: 20px; }
         .error { color: red; }
+        .speaker-section {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background-color: #e8f4f8;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>זיהוי דוברים</h1>
+        <h1>תמלול אודיו</h1>
         
         <div class="upload-section">
             <input type="file" id="audioFile" accept="audio/*">
+            <p id="fileInfo"></p>
+        </div>
+
+        <div class="options-section">
+            <label>
+                <input type="checkbox" id="dualChannel"> 
+                הקלטה בשני ערוצים (סטריאו עם דובר נפרד בכל ערוץ)
+            </label>
+            <br><br>
             <button onclick="uploadAndTranscribe()">התחל תמלול</button>
         </div>
 
@@ -44,28 +69,36 @@
 
     <script>
         const API_KEY = 'be1668db81284f6ab3e30ae1a7ffac43';
+        let audioFile = null;
+
+        document.getElementById('audioFile').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                audioFile = file;
+                document.getElementById('fileInfo').textContent = 
+                    `נבחר: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+            }
+        });
 
         async function uploadAndTranscribe() {
-            const fileInput = document.getElementById('audioFile');
             const statusDiv = document.getElementById('status');
             const resultDiv = document.getElementById('result');
+            const isDualChannel = document.getElementById('dualChannel').checked;
 
-            if (!fileInput.files.length) {
+            if (!audioFile) {
                 alert('אנא בחר קובץ');
                 return;
             }
 
-            const file = fileInput.files[0];
-            statusDiv.innerHTML = 'מעלה קובץ...';
-
             try {
                 // העלאת הקובץ
+                statusDiv.innerHTML = 'מעלה קובץ...';
                 const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
                     method: 'POST',
                     headers: {
                         'authorization': API_KEY
                     },
-                    body: file
+                    body: audioFile
                 });
 
                 if (!uploadResponse.ok) {
@@ -75,9 +108,8 @@
                 const uploadResult = await uploadResponse.json();
                 console.log('Upload result:', uploadResult);
 
+                // בקשת תמלול
                 statusDiv.innerHTML = 'מתחיל תמלול...';
-
-                // בקשת תמלול עם המודל הנכון
                 const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -87,8 +119,8 @@
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
                         language_code: 'he',
-                        speech_model: 'nano',  // מודל שתומך בעברית
-                        speaker_labels: true
+                        dual_channel: isDualChannel,
+                        speaker_labels: !isDualChannel  // נשתמש בזיהוי דוברים רק אם לא מדובר בהקלטה דו-ערוצית
                     })
                 });
 
@@ -103,18 +135,18 @@
                 const transcriptId = transcriptResult.id;
 
                 // בדיקת סטטוס התמלול
-                let transcript;
+                statusDiv.innerHTML = 'מתמלל... אנא המתן';
                 while (true) {
-                    statusDiv.innerHTML = 'מתמלל... אנא המתן';
-                    
                     const pollingResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
                         headers: { 'authorization': API_KEY }
                     });
                     
-                    transcript = await pollingResponse.json();
+                    const transcript = await pollingResponse.json();
                     console.log('Polling status:', transcript.status);
                     
                     if (transcript.status === 'completed') {
+                        displayResults(transcript, isDualChannel);
+                        statusDiv.innerHTML = 'התמלול הושלם!';
                         break;
                     } else if (transcript.status === 'error') {
                         throw new Error(`שגיאת עיבוד: ${transcript.error}`);
@@ -123,33 +155,68 @@
                     await new Promise(resolve => setTimeout(resolve, 3000));
                 }
 
-                // הצגת התוצאות
-                statusDiv.innerHTML = 'התמלול הושלם!';
-                console.log('Final transcript:', transcript);
-
-                if (transcript.utterances && transcript.utterances.length > 0) {
-                    let output = '<h2>תוצאות התמלול:</h2>';
-                    transcript.utterances.forEach(utterance => {
-                        const minutes = Math.floor(utterance.start / 60000);
-                        const seconds = Math.floor((utterance.start % 60000) / 1000);
-                        const timeStamp = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                        
-                        output += `
-                            <p>
-                                <strong>[${timeStamp}] דובר ${utterance.speaker}:</strong><br>
-                                ${utterance.text}
-                            </p>
-                        `;
-                    });
-                    resultDiv.innerHTML = output;
-                } else {
-                    resultDiv.innerHTML = '<p>לא נמצאו תוצאות תמלול</p>';
-                }
-
             } catch (error) {
                 console.error('Error:', error);
                 statusDiv.innerHTML = `<div class="error">שגיאה: ${error.message}</div>`;
             }
+        }
+
+        function displayResults(transcript, isDualChannel) {
+            const resultDiv = document.getElementById('result');
+            let output = '<h2>תוצאות התמלול:</h2>';
+
+            if (isDualChannel) {
+                // עיבוד תוצאות להקלטה דו-ערוצית
+                if (transcript.words && transcript.words.length > 0) {
+                    let currentChannel = null;
+                    let currentText = '';
+                    let startTime = null;
+
+                    transcript.words.forEach(word => {
+                        if (currentChannel !== word.channel || !startTime) {
+                            if (currentText) {
+                                output += createSegmentHTML(currentChannel, currentText, startTime);
+                            }
+                            currentChannel = word.channel;
+                            currentText = word.text;
+                            startTime = word.start;
+                        } else {
+                            currentText += ' ' + word.text;
+                        }
+                    });
+                    
+                    if (currentText) {
+                        output += createSegmentHTML(currentChannel, currentText, startTime);
+                    }
+                }
+            } else {
+                // עיבוד תוצאות לזיהוי דוברים רגיל
+                if (transcript.utterances && transcript.utterances.length > 0) {
+                    transcript.utterances.forEach(utterance => {
+                        output += createSegmentHTML(
+                            utterance.speaker,
+                            utterance.text,
+                            utterance.start
+                        );
+                    });
+                }
+            }
+
+            resultDiv.innerHTML = output || '<p>לא נמצאו תוצאות תמלול</p>';
+        }
+
+        function createSegmentHTML(speaker, text, startTime) {
+            const minutes = Math.floor(startTime / 60000);
+            const seconds = Math.floor((startTime % 60000) / 1000);
+            const timeStamp = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            return `
+                <div class="speaker-section">
+                    <div class="timestamp">${timeStamp}</div>
+                    <strong>דובר ${typeof speaker === 'number' ? speaker + 1 : speaker}:</strong>
+                    <div>${text}</div>
+                </div>
+            `;
         }
     </script>
 </body>
