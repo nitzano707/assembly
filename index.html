@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>זיהוי דוברים</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            text-align: center;
+        }
+        pre {
+            direction: ltr;
+            text-align: left;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .segment {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            background-color: #f8f9fa;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        .time {
+            color: #666;
+            min-width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>זיהוי דוברים</h1>
+        
+        <div class="upload-section">
+            <input type="file" id="audioFile" accept="audio/*">
+            <p id="fileInfo"></p>
+            <button onclick="analyze()">זהה דוברים</button>
+        </div>
+
+        <div id="status"></div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        const API_KEY = 'be1668db81284f6ab3e30ae1a7ffac43';
+        let audioFile = null;
+
+        document.getElementById('audioFile').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                audioFile = file;
+                document.getElementById('fileInfo').textContent = 
+                    `נבחר: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
+            }
+        });
+
+        async function analyze() {
+            if (!audioFile) {
+                alert('אנא בחר קובץ אודיו');
+                return;
+            }
+
+            const status = document.getElementById('status');
+            const result = document.getElementById('result');
+            result.innerHTML = '';
+
+            try {
+                status.textContent = 'מעלה קובץ...';
+                
+                const uploadResponse = await fetch('https://api.assemblyai.com/v2/upload', {
+                    method: 'POST',
+                    headers: {
+                        'authorization': API_KEY
+                    },
+                    body: audioFile
+                });
+
+                if (!uploadResponse.ok) {
+                    throw new Error('שגיאה בהעלאת הקובץ');
+                }
+
+                const uploadResult = await uploadResponse.json();
+                console.log('Upload result:', uploadResult);
+
+                status.textContent = 'מבקש תמלול וזיהוי דוברים...';
+                
+                const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
+                    method: 'POST',
+                    headers: {
+                        'authorization': API_KEY,
+                        'content-type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        audio_url: uploadResult.upload_url,
+                        diarization: true,
+                        speakers_expected: 2,
+                        diarize_audio: true
+                    })
+                });
+
+                if (!transcriptResponse.ok) {
+                    const errorText = await transcriptResponse.text();
+                    console.error('Transcription error:', errorText);
+                    throw new Error('שגיאה בבקשת הזיהוי');
+                }
+
+                const transcriptResult = await transcriptResponse.json();
+                console.log('Transcript request:', transcriptResult);
+
+                status.textContent = 'מעבד...';
+                
+                // בדיקת סטטוס כל 3 שניות
+                while (true) {
+                    const pollingResponse = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptResult.id}`, {
+                        headers: { 'authorization': API_KEY }
+                    });
+                    
+                    const currentResult = await pollingResponse.json();
+                    console.log('Current status:', currentResult.status);
+                    status.textContent = `סטטוס: ${currentResult.status}`;
+                    
+                    if (currentResult.status === 'completed') {
+                        processTranscript(currentResult);
+                        break;
+                    } else if (currentResult.status === 'error') {
+                        throw new Error(currentResult.error);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                status.textContent = `שגיאה: ${error.message}`;
+            }
+        }
+
+        function processTranscript(transcript) {
+            const result = document.getElementById('result');
+            
+            if (transcript.words) {
+                // קיבוץ מילים לפי זמן ודובר
+                let segments = [];
+                let currentSegment = null;
+                
+                transcript.words.forEach(word => {
+                    if (!currentSegment || shouldStartNewSegment(currentSegment, word)) {
+                        if (currentSegment) {
+                            segments.push(currentSegment);
+                        }
+                        currentSegment = {
+                            start: word.start,
+                            end: word.end,
+                            text: [word.text],
+                            speaker: word.speaker
+                        };
+                    } else {
+                        currentSegment.end = word.end;
+                        currentSegment.text.push(word.text);
+                    }
+                });
+                
+                if (currentSegment) {
+                    segments.push(currentSegment);
+                }
+
+                // חישוב סטטיסטיקות
+                const stats = {};
+                let totalDuration = 0;
+                
+                segments.forEach(segment => {
+                    const duration = segment.end - segment.start;
+                    totalDuration += duration;
+                    
+                    if (!stats[segment.speaker]) {
+                        stats[segment.speaker] = {
+                            totalTime: 0,
+                            segmentCount: 0
+                        };
+                    }
+                    stats[segment.speaker].totalTime += duration;
+                    stats[segment.speaker].segmentCount++;
+                });
+
+                // הצגת התוצאות
+                let html = '<h2>מקטעי דיבור:</h2>';
+                
+                segments.forEach(segment => {
+                    const duration = ((segment.end - segment.start) / 1000).toFixed(1);
+                    html += `
+                        <div class="segment">
+                            <span class="time">${formatTime(segment.start)} - ${formatTime(segment.end)}</span>
+                            <strong>דובר ${parseInt(segment.speaker || 0) + 1}</strong>
+                            <span>(${duration} שניות)</span>
+                        </div>
+                    `;
+                });
+
+                // הצגת סטטיסטיקות
+                html += '<h2>סטטיסטיקות:</h2>';
+                Object.entries(stats).forEach(([speaker, data]) => {
+                    const percentage = ((data.totalTime / totalDuration) * 100).toFixed(1);
+                    html += `
+                        <div>
+                            <strong>דובר ${parseInt(speaker || 0) + 1}:</strong>
+                            <ul>
+                                <li>${data.segmentCount} מקטעים</li>
+                                <li>${(data.totalTime / 1000).toFixed(1)} שניות (${percentage}%)</li>
+                            </ul>
+                        </div>
+                    `;
+                });
+
+                result.innerHTML = html;
+            } else {
+                result.innerHTML = '<p>לא זוהו מקטעי דיבור</p>';
+            }
+        }
+
+        function shouldStartNewSegment(currentSegment, word) {
+            const GAP_THRESHOLD = 1000; // מרווח של שנייה
+            return word.speaker !== currentSegment.speaker || 
+                   (word.start - currentSegment.end) > GAP_THRESHOLD;
+        }
+
+        function formatTime(ms) {
+            const totalSeconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>
