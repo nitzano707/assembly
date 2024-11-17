@@ -3,27 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>זיהוי דוברים מתקדם</title>
+    <title>זיהוי דוברים</title>
     <style>
-        /* אותו עיצוב כמו קודם... */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
             margin: 20px auto;
             padding: 20px;
-            background-color: #f5f5f5;
         }
         .container {
             background: white;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .config-section {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f8f9fa;
-            border-radius: 4px;
         }
         .upload-section {
             border: 2px dashed #ccc;
@@ -43,7 +35,6 @@
         .speaker-0 { background-color: #e8f4f8; }
         .speaker-1 { background-color: #fdf2e9; }
         .speaker-2 { background-color: #e8f8e8; }
-        .speaker-3 { background-color: #f8e8f8; }
         .time {
             min-width: 180px;
             color: #666;
@@ -56,12 +47,6 @@
             padding: 10px 20px;
             border-radius: 4px;
             cursor: pointer;
-            margin: 5px;
-        }
-        input[type="number"] {
-            width: 60px;
-            padding: 5px;
-            margin: 0 5px;
         }
         #status {
             margin: 10px 0;
@@ -72,20 +57,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>זיהוי דוברים מתקדם</h1>
+        <h1>זיהוי דוברים</h1>
         
-        <div class="config-section">
-            <label>
-                מספר דוברים צפוי:
-                <input type="number" id="speakersCount" value="2" min="2" max="10">
-            </label>
-            <br><br>
-            <label>
-                רגישות זיהוי (שניות):
-                <input type="number" id="minSpeakerDuration" value="3" min="1" max="10" step="0.5">
-            </label>
-        </div>
-
         <div class="upload-section">
             <input type="file" id="audioFile" accept="audio/*">
             <p id="fileInfo"></p>
@@ -115,9 +88,6 @@
                 return;
             }
 
-            const speakersCount = parseInt(document.getElementById('speakersCount').value);
-            const minSpeakerDuration = parseFloat(document.getElementById('minSpeakerDuration').value);
-            
             const status = document.getElementById('status');
             status.textContent = 'מעלה קובץ...';
 
@@ -148,14 +118,7 @@
                     },
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
-                        speaker_labels: true,
-                        speakers_expected: speakersCount,
-                        diarization: true,
-                        diarization_parameters: {
-                            min_speaker_duration: minSpeakerDuration,
-                            maximum_speaker_count: speakersCount,
-                            minimum_speaker_count: 2
-                        }
+                        speaker_labels: true
                     })
                 });
 
@@ -176,10 +139,9 @@
                     });
                     
                     const result = await pollingResponse.json();
-                    console.log('Polling response:', result);
                     
                     if (result.status === 'completed') {
-                        displaySpeakerSegments(result);
+                        displayResults(result);
                         status.textContent = 'הזיהוי הושלם!';
                         break;
                     } else if (result.status === 'error') {
@@ -197,46 +159,49 @@
             }
         }
 
-        function displaySpeakerSegments(result) {
+        function displayResults(result) {
             const resultDiv = document.getElementById('result');
-            let html = '<h2>מקטעי דוברים:</h2>';
+            let html = '<h2>זיהוי דוברים:</h2>';
 
             if (result.utterances && result.utterances.length > 0) {
-                let speakerStats = {};
-
                 result.utterances.forEach(utterance => {
+                    // חישוב משך זמן בשניות
                     const duration = (utterance.end - utterance.start) / 1000;
                     
-                    if (!speakerStats[utterance.speaker]) {
-                        speakerStats[utterance.speaker] = {
-                            totalTime: 0,
-                            segments: 0
-                        };
-                    }
-                    speakerStats[utterance.speaker].totalTime += duration;
-                    speakerStats[utterance.speaker].segments++;
-
                     html += `
                         <div class="segment speaker-${utterance.speaker}">
-                            <span class="time">
-                                ${formatTime(utterance.start)} - ${formatTime(utterance.end)}
-                            </span>
+                            <span class="time">${formatTime(utterance.start)} - ${formatTime(utterance.end)}</span>
                             <strong>דובר ${parseInt(utterance.speaker) + 1}</strong>
                             <span>(${duration.toFixed(1)} שניות)</span>
                         </div>
                     `;
                 });
 
+                // סטטיסטיקות
+                const stats = result.utterances.reduce((acc, utterance) => {
+                    const speaker = utterance.speaker;
+                    if (!acc[speaker]) {
+                        acc[speaker] = {
+                            count: 0,
+                            totalTime: 0
+                        };
+                    }
+                    acc[speaker].count++;
+                    acc[speaker].totalTime += (utterance.end - utterance.start) / 1000;
+                    return acc;
+                }, {});
+
                 html += '<h3>סיכום:</h3>';
-                Object.entries(speakerStats).forEach(([speaker, stats]) => {
+                Object.entries(stats).forEach(([speaker, data]) => {
                     html += `
                         <div>
                             <strong>דובר ${parseInt(speaker) + 1}:</strong>
-                            ${stats.segments} מקטעים,
-                            סה"כ ${stats.totalTime.toFixed(1)} שניות
+                            ${data.count} מקטעים,
+                            סה"כ ${data.totalTime.toFixed(1)} שניות
                         </div>
                     `;
                 });
+
             } else {
                 html += '<p>לא זוהו דוברים</p>';
             }
