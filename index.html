@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>זיהוי דוברים לפי זמן</title>
+    <title>זיהוי דוברים ותמלול בעברית</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -48,16 +48,21 @@
             border-radius: 4px;
             cursor: pointer;
         }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>זיהוי דוברים לפי זמן</h1>
+        <h1>תמלול ודיבור בעברית</h1>
         
         <div class="upload-section">
             <input type="file" id="audioFile" accept="audio/*">
             <p id="fileInfo"></p>
-            <button onclick="analyze()">זהה דוברים</button>
+            <button onclick="analyze()">התחל תמלול</button>
         </div>
 
         <div id="status"></div>
@@ -96,11 +101,15 @@
                     body: audioFile
                 });
 
-                if (!uploadResponse.ok) throw new Error('שגיאה בהעלאת הקובץ');
-                const uploadResult = await uploadResponse.json();
+                if (!uploadResponse.ok) {
+                    throw new Error('שגיאה בהעלאת הקובץ');
+                }
 
-                // בקשת אנליזה
-                status.textContent = 'מזהה דוברים...';
+                const uploadResult = await uploadResponse.json();
+                console.log('Upload result:', uploadResult);
+
+                // בקשת תמלול
+                status.textContent = 'מתמלל...';
                 const transcriptResponse = await fetch('https://api.assemblyai.com/v2/transcript', {
                     method: 'POST',
                     headers: {
@@ -109,13 +118,21 @@
                     },
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
-                        speaker_labels: true,
-                        language_code: 'he'
+                        language_code: 'he',
+                        model: 'nano',
+                        speaker_labels: true
                     })
                 });
 
-                if (!transcriptResponse.ok) throw new Error('שגיאה בבקשת הזיהוי');
-                const { id } = await transcriptResponse.json();
+                if (!transcriptResponse.ok) {
+                    const errorText = await transcriptResponse.text();
+                    console.error('Transcription error response:', errorText);
+                    throw new Error(`שגיאה בבקשת התמלול: ${transcriptResponse.status}`);
+                }
+
+                const transcriptResult = await transcriptResponse.json();
+                console.log('Transcript request result:', transcriptResult);
+                const id = transcriptResult.id;
 
                 // בדיקת סטטוס
                 while (true) {
@@ -124,10 +141,11 @@
                     });
                     
                     const result = await pollingResponse.json();
+                    console.log('Polling response:', result);
                     
                     if (result.status === 'completed') {
-                        displaySpeakerTimeline(result);
-                        status.textContent = 'הזיהוי הושלם!';
+                        displayTranscript(result);
+                        status.textContent = 'התמלול הושלם!';
                         break;
                     } else if (result.status === 'error') {
                         throw new Error(result.error);
@@ -137,40 +155,41 @@
                 }
 
             } catch (error) {
+                console.error('Error:', error);
                 status.textContent = `שגיאה: ${error.message}`;
             }
         }
 
-        function displaySpeakerTimeline(result) {
+        function displayTranscript(result) {
             const timeline = document.getElementById('timeline');
             let html = '';
 
             if (result.words && result.words.length > 0) {
                 let currentSpeaker = null;
+                let currentText = '';
                 let segmentStart = null;
-                let lastTimestamp = null;
 
                 result.words.forEach((word, index) => {
                     if (currentSpeaker !== word.speaker || index === result.words.length - 1) {
-                        if (currentSpeaker !== null) {
-                            const endTime = index === result.words.length - 1 ? word.end : lastTimestamp;
+                        if (currentText) {
                             html += `
                                 <div class="segment speaker-${currentSpeaker}">
-                                    <span class="time">
-                                        ${formatTime(segmentStart)} - ${formatTime(endTime)}
-                                    </span>
-                                    <strong>דובר ${parseInt(currentSpeaker) + 1}</strong>
+                                    <span class="time">${formatTime(segmentStart)}</span>
+                                    <strong>דובר ${parseInt(currentSpeaker) + 1}:</strong>
+                                    <span>${currentText}</span>
                                 </div>
                             `;
                         }
                         currentSpeaker = word.speaker;
+                        currentText = word.text;
                         segmentStart = word.start;
+                    } else {
+                        currentText += ' ' + word.text;
                     }
-                    lastTimestamp = word.end;
                 });
             }
 
-            timeline.innerHTML = html || '<p>לא זוהו דוברים</p>';
+            timeline.innerHTML = html || '<p>לא נמצאו תוצאות</p>';
         }
 
         function formatTime(ms) {
