@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>זיהוי דוברים</title>
     <style>
+        /* ... same styles ... */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
@@ -125,9 +126,8 @@
                     },
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
-                        diarization: true,
-                        speakers_expected: 2,
-                        diarize_audio: true
+                        speaker_labels: true,
+                        speakers_expected: 2
                     })
                 });
 
@@ -153,7 +153,7 @@
                     status.textContent = `סטטוס: ${currentResult.status}`;
                     
                     if (currentResult.status === 'completed') {
-                        processTranscript(currentResult);
+                        processResults(currentResult);
                         break;
                     } else if (currentResult.status === 'error') {
                         throw new Error(currentResult.error);
@@ -168,92 +168,67 @@
             }
         }
 
-        function processTranscript(transcript) {
-            const result = document.getElementById('result');
+        function processResults(result) {
+            const resultDiv = document.getElementById('result');
             
-            if (transcript.words) {
-                // קיבוץ מילים לפי זמן ודובר
-                let segments = [];
-                let currentSegment = null;
-                
-                transcript.words.forEach(word => {
-                    if (!currentSegment || shouldStartNewSegment(currentSegment, word)) {
-                        if (currentSegment) {
-                            segments.push(currentSegment);
-                        }
-                        currentSegment = {
-                            start: word.start,
-                            end: word.end,
-                            text: [word.text],
-                            speaker: word.speaker
-                        };
-                    } else {
-                        currentSegment.end = word.end;
-                        currentSegment.text.push(word.text);
-                    }
-                });
-                
-                if (currentSegment) {
-                    segments.push(currentSegment);
-                }
+            console.log('Processing results:', result);  // לדיבאג
 
-                // חישוב סטטיסטיקות
-                const stats = {};
-                let totalDuration = 0;
-                
-                segments.forEach(segment => {
-                    const duration = segment.end - segment.start;
-                    totalDuration += duration;
-                    
-                    if (!stats[segment.speaker]) {
-                        stats[segment.speaker] = {
-                            totalTime: 0,
-                            segmentCount: 0
-                        };
-                    }
-                    stats[segment.speaker].totalTime += duration;
-                    stats[segment.speaker].segmentCount++;
-                });
-
-                // הצגת התוצאות
+            if (result.utterances && result.utterances.length > 0) {
                 let html = '<h2>מקטעי דיבור:</h2>';
-                
-                segments.forEach(segment => {
-                    const duration = ((segment.end - segment.start) / 1000).toFixed(1);
+                let speakerStats = {};
+                let totalDuration = 0;
+
+                result.utterances.forEach(utterance => {
+                    const duration = (utterance.end - utterance.start) / 1000;
+                    totalDuration += duration;
+
+                    if (!speakerStats[utterance.speaker]) {
+                        speakerStats[utterance.speaker] = {
+                            totalTime: 0,
+                            segments: 0
+                        };
+                    }
+                    speakerStats[utterance.speaker].totalTime += duration;
+                    speakerStats[utterance.speaker].segments++;
+
                     html += `
                         <div class="segment">
-                            <span class="time">${formatTime(segment.start)} - ${formatTime(segment.end)}</span>
-                            <strong>דובר ${parseInt(segment.speaker || 0) + 1}</strong>
-                            <span>(${duration} שניות)</span>
+                            <span class="time">${formatTime(utterance.start)} - ${formatTime(utterance.end)}</span>
+                            <strong>דובר ${parseInt(utterance.speaker) + 1}</strong>
+                            <span>(${duration.toFixed(1)} שניות)</span>
                         </div>
                     `;
                 });
 
-                // הצגת סטטיסטיקות
+                // סטטיסטיקות
                 html += '<h2>סטטיסטיקות:</h2>';
-                Object.entries(stats).forEach(([speaker, data]) => {
-                    const percentage = ((data.totalTime / totalDuration) * 100).toFixed(1);
+                Object.entries(speakerStats).forEach(([speaker, stats]) => {
+                    const percentage = (stats.totalTime / totalDuration * 100).toFixed(1);
                     html += `
                         <div>
-                            <strong>דובר ${parseInt(speaker || 0) + 1}:</strong>
+                            <strong>דובר ${parseInt(speaker) + 1}:</strong>
                             <ul>
-                                <li>${data.segmentCount} מקטעים</li>
-                                <li>${(data.totalTime / 1000).toFixed(1)} שניות (${percentage}%)</li>
+                                <li>${stats.segments} מקטעים</li>
+                                <li>${stats.totalTime.toFixed(1)} שניות (${percentage}%)</li>
                             </ul>
                         </div>
                     `;
                 });
 
-                result.innerHTML = html;
+                resultDiv.innerHTML = html;
             } else {
-                result.innerHTML = '<p>לא זוהו מקטעי דיבור</p>';
+                resultDiv.innerHTML = '<p>לא זוהו מקטעי דיבור</p>';
+                
+                // הוספת מידע לדיבאג
+                if (result.words && result.words.length > 0) {
+                    resultDiv.innerHTML += `
+                        <div style="margin-top: 20px;">
+                            <h3>מידע נוסף לדיבאג:</h3>
+                            <pre>${JSON.stringify(result.words.slice(0, 10), null, 2)}</pre>
+                        </div>
+                    `;
+                }
             }
-        }
-
-        function shouldStartNewSegment(currentSegment, word) {
-            const GAP_THRESHOLD = 1000; // מרווח של שנייה
-            return word.speaker !== currentSegment.speaker || 
-                   (word.start - currentSegment.end) > GAP_THRESHOLD;
         }
 
         function formatTime(ms) {
