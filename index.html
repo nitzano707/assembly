@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>זיהוי דוברים</title>
+    <title>זיהוי דוברים מתקדם</title>
     <style>
+        /* אותו עיצוב כמו קודם... */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             max-width: 800px;
@@ -17,6 +18,12 @@
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .config-section {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
         }
         .upload-section {
             border: 2px dashed #ccc;
@@ -49,23 +56,36 @@
             padding: 10px 20px;
             border-radius: 4px;
             cursor: pointer;
+            margin: 5px;
+        }
+        input[type="number"] {
+            width: 60px;
+            padding: 5px;
+            margin: 0 5px;
         }
         #status {
             margin: 10px 0;
             padding: 10px;
-            border-radius: 4px;
             text-align: center;
-        }
-        .duration {
-            color: #666;
-            font-size: 0.9em;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>זיהוי דוברים וחותמות זמן</h1>
+        <h1>זיהוי דוברים מתקדם</h1>
         
+        <div class="config-section">
+            <label>
+                מספר דוברים צפוי:
+                <input type="number" id="speakersCount" value="2" min="2" max="10">
+            </label>
+            <br><br>
+            <label>
+                רגישות זיהוי (שניות):
+                <input type="number" id="minSpeakerDuration" value="3" min="1" max="10" step="0.5">
+            </label>
+        </div>
+
         <div class="upload-section">
             <input type="file" id="audioFile" accept="audio/*">
             <p id="fileInfo"></p>
@@ -95,6 +115,9 @@
                 return;
             }
 
+            const speakersCount = parseInt(document.getElementById('speakersCount').value);
+            const minSpeakerDuration = parseFloat(document.getElementById('minSpeakerDuration').value);
+            
             const status = document.getElementById('status');
             status.textContent = 'מעלה קובץ...';
 
@@ -126,7 +149,13 @@
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
                         speaker_labels: true,
-                        speakers_expected: 2  // ניתן לשנות לפי הצורך
+                        speakers_expected: speakersCount,
+                        diarization: true,
+                        diarization_parameters: {
+                            min_speaker_duration: minSpeakerDuration,
+                            maximum_speaker_count: speakersCount,
+                            minimum_speaker_count: 2
+                        }
                     })
                 });
 
@@ -176,10 +205,8 @@
                 let speakerStats = {};
 
                 result.utterances.forEach(utterance => {
-                    // חישוב משך הזמן של המקטע
-                    const duration = (utterance.end - utterance.start) / 1000; // המרה לשניות
+                    const duration = (utterance.end - utterance.start) / 1000;
                     
-                    // מעקב אחרי סטטיסטיקות לכל דובר
                     if (!speakerStats[utterance.speaker]) {
                         speakerStats[utterance.speaker] = {
                             totalTime: 0,
@@ -195,12 +222,11 @@
                                 ${formatTime(utterance.start)} - ${formatTime(utterance.end)}
                             </span>
                             <strong>דובר ${parseInt(utterance.speaker) + 1}</strong>
-                            <span class="duration">(${duration.toFixed(1)} שניות)</span>
+                            <span>(${duration.toFixed(1)} שניות)</span>
                         </div>
                     `;
                 });
 
-                // הוספת סטטיסטיקות
                 html += '<h3>סיכום:</h3>';
                 Object.entries(speakerStats).forEach(([speaker, stats]) => {
                     html += `
@@ -222,7 +248,7 @@
             const totalSeconds = Math.floor(ms / 1000);
             const minutes = Math.floor(totalSeconds / 60);
             const seconds = totalSeconds % 60;
-            const milliseconds = Math.floor((ms % 1000) / 10); // רק 2 ספרות
+            const milliseconds = Math.floor((ms % 1000) / 10);
             return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
         }
     </script>
