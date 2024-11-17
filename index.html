@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>זיהוי דוברים ותמלול בעברית</title>
+    <title>תמלול בעברית</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -24,21 +24,11 @@
             margin: 20px 0;
             border-radius: 8px;
         }
-        .timeline {
-            margin-top: 20px;
-        }
         .segment {
             padding: 10px;
             margin: 5px 0;
             border-radius: 4px;
-            display: flex;
-            align-items: center;
-        }
-        .speaker-0 { background-color: #e8f4f8; }
-        .speaker-1 { background-color: #fdf2e9; }
-        .time { 
-            min-width: 120px;
-            color: #666;
+            background-color: #f8f9fa;
         }
         button {
             background: #3498db;
@@ -57,7 +47,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>תמלול ודיבור בעברית</h1>
+        <h1>תמלול בעברית</h1>
         
         <div class="upload-section">
             <input type="file" id="audioFile" accept="audio/*">
@@ -66,7 +56,7 @@
         </div>
 
         <div id="status"></div>
-        <div id="timeline" class="timeline"></div>
+        <div id="result"></div>
     </div>
 
     <script>
@@ -119,8 +109,7 @@
                     body: JSON.stringify({
                         audio_url: uploadResult.upload_url,
                         language_code: 'he',
-                        model: 'nano',
-                        speaker_labels: true
+                        speech_model: 'nano'  // שינוי מ-model ל-speech_model
                     })
                 });
 
@@ -149,6 +138,8 @@
                         break;
                     } else if (result.status === 'error') {
                         throw new Error(result.error);
+                    } else {
+                        status.textContent = `מתמלל... (${result.status})`;
                     }
                     
                     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -161,41 +152,18 @@
         }
 
         function displayTranscript(result) {
-            const timeline = document.getElementById('timeline');
-            let html = '';
-
-            if (result.words && result.words.length > 0) {
-                let currentSpeaker = null;
-                let currentText = '';
-                let segmentStart = null;
-
-                result.words.forEach((word, index) => {
-                    if (currentSpeaker !== word.speaker || index === result.words.length - 1) {
-                        if (currentText) {
-                            html += `
-                                <div class="segment speaker-${currentSpeaker}">
-                                    <span class="time">${formatTime(segmentStart)}</span>
-                                    <strong>דובר ${parseInt(currentSpeaker) + 1}:</strong>
-                                    <span>${currentText}</span>
-                                </div>
-                            `;
-                        }
-                        currentSpeaker = word.speaker;
-                        currentText = word.text;
-                        segmentStart = word.start;
-                    } else {
-                        currentText += ' ' + word.text;
-                    }
-                });
+            const resultDiv = document.getElementById('result');
+            
+            if (result.text) {
+                resultDiv.innerHTML = `
+                    <div class="segment">
+                        <h3>תמלול:</h3>
+                        <p>${result.text}</p>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = '<p>לא נמצא תמלול</p>';
             }
-
-            timeline.innerHTML = html || '<p>לא נמצאו תוצאות</p>';
-        }
-
-        function formatTime(ms) {
-            const minutes = Math.floor(ms / 60000);
-            const seconds = Math.floor((ms % 60000) / 1000);
-            return `${minutes}:${seconds.toString().padStart(2, '0')}`;
         }
     </script>
 </body>
